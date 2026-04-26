@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>普耕精舍 - 標籤印製雲端法寶</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        :root { --pugen-brown: #5d4037; --pugen-gold: #8d6e63; --pugen-bg: #fafafa; }
+        body { font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; background-color: #f0f0f0; margin: 0; padding: 10px; }
+        
+        /* 介面設計 */
+        .container { max-width: 800px; margin: 20px auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; }
+        .header { background: var(--pugen-brown); color: white; padding: 25px; text-align: center; }
+        .header h1 { margin: 0; font-size: 1.8rem; letter-spacing: 2px; }
+        .content { padding: 30px; }
+        
+        /* 操作指引 */
+        .step { margin-bottom: 30px; border-bottom: 1px dashed #eee; padding-bottom: 20px; }
+        .step-label { display: block; font-size: 1.2rem; color: var(--pugen-brown); font-weight: bold; margin-bottom: 10px; }
+        
+        /* 按鈕與選單 */
+        .file-drop { border: 2px dashed var(--pugen-gold); padding: 30px; text-align: center; border-radius: 10px; cursor: pointer; background: #fffaf0; transition: 0.3s; }
+        .file-drop:hover { background: #fdf5e6; }
+        select { width: 100%; padding: 15px; font-size: 1.2rem; border-radius: 8px; border: 1px solid #ccc; margin-top: 10px; }
+        
+        .btn-print { background: var(--pugen-brown); color: white; border: none; padding: 18px; width: 100%; font-size: 1.4rem; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-print:active { transform: scale(0.98); }
+
+        /* A4 列印標準 (210mm x 297mm) */
+        #print-area { 
+            width: 210mm; min-height: 297mm; background: white; margin: 20px auto; 
+            padding: 9mm 5mm; /* 邊距微調 */
+            display: grid; 
+            grid-template-columns: repeat(5, 40mm); 
+            grid-auto-rows: 20mm; 
+            box-sizing: border-box;
+        }
+
+        /* 標籤小方格 (2cm x 4cm) */
+        .label-item {
+            width: 40mm; height: 20mm; border: 0.1mm solid #ddd;
+            box-sizing: border-box; display: flex; flex-direction: column;
+            padding: 2mm 2.5mm; overflow: hidden;
+        }
+        .row-up { display: flex; justify-content: space-between; align-items: flex-start; }
+        .row-mid { flex-grow: 1; display: flex; align-items: center; justify-content: flex-end; }
+        .row-down { display: flex; justify-content: space-between; align-items: flex-end; }
+
+        .tag-cat { font-size: 8pt; color: #666; }
+        .tag-name { font-size: 18pt; font-weight: 900; border-bottom: 1.2px solid #000; line-height: 1; }
+        .tag-evt { font-size: 8pt; color: #666; }
+        .tag-order { font-size: 14pt; font-weight: 900; background: #000; color: #fff; padding: 0 4px; border-radius: 2px; }
+
+        @media print {
+            body { background: white; padding: 0; }
+            .container { display: none; }
+            #print-area { border: none; margin: 0; }
+            .label-item { border: 0.1mm solid #f0f0f0; } /* 列印時切線極淡 */
+            @page { size: A4; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>普耕精舍標籤雲端工具</h1>
+        <div style="font-size: 0.9rem; margin-top: 5px; opacity: 0.8;">靜坐常思己過 · 閒談莫論人非</div>
+    </div>
+    
+    <div class="content">
+        <div class="step">
+            <span class="step-label">壹、啟請名單 (Excel 或 CSV)</span>
+            <label class="file-drop" id="drop-zone">
+                <span id="file-name">點擊此處選擇檔案</span>
+                <input type="file" id="upload-input" accept=".xlsx, .xls, .csv" style="display:none;">
+            </label>
+        </div>
+
+        <div class="step" id="filter-wrap" style="display:none;">
+            <span class="step-label">貳、選擇類別與事件</span>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <select id="cat-sel"><option value="">-- 類別 --</option></select>
+                <select id="evt-sel"><option value="">-- 事件 --</option></select>
+            </div>
+        </div>
+
+        <button class="btn-print" onclick="window.print()">參、預覽並列印</button>
+        <p style="text-align:center; font-size: 0.8rem; color: #999; margin-top: 15px;">
+            提示：列印時請確認「邊距：無」及「縮放：100%」
+        </p>
+    </div>
+</div>
+
+<div id="print-area">
+    </div>
+
+<script>
+    let mainData = [];
+    const input = document.getElementById('upload-input');
+    const label = document.getElementById('file-name');
+
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        label.innerText = "已載入：" + file.name;
+        
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            mainData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+            
+            buildMenus();
+            document.getElementById('filter-wrap').style.display = 'block';
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    function buildMenus() {
+        const cats = [...new Set(mainData.map(d => d.類別))].filter(Boolean);
+        const evts = [...new Set(mainData.map(d => d.事件))].filter(Boolean);
+        const cS = document.getElementById('cat-sel');
+        const eS = document.getElementById('evt-sel');
+        
+        cS.innerHTML = '<option value="">-- 類別 --</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+        eS.innerHTML = '<option value="">-- 事件 --</option>' + evts.map(e => `<option value="${e}">${e}</option>`).join('');
+        
+        cS.onchange = eS.onchange = refresh;
+    }
+
+    function refresh() {
+        const cV = document.getElementById('cat-sel').value;
+        const eV = document.getElementById('evt-sel').value;
+        const area = document.getElementById('print-area');
+        area.innerHTML = '';
+        if (!cV || !eV) return;
+
+        const filtered = mainData.filter(d => d.類別 === cV && d.事件 === eV);
+        filtered.sort((a, b) => String(a.順序編號).localeCompare(String(b.順序編號), undefined, {numeric: true}));
+
+        filtered.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'label-item';
+            div.innerHTML = `
+                <div class="row-up"><span class="tag-cat">${item.類別}</span></div>
+                <div class="row-mid"><span class="tag-name">${item.姓名}</span></div>
+                <div class="row-down"><span class="tag-evt">${item.事件}</span><span class="tag-order">${item.順序編號}</span></div>
+            `;
+            area.appendChild(div);
+        });
+    }
+</script>
+
+</body>
+</html>
